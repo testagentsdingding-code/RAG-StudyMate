@@ -5,4 +5,4 @@ groq
 python-dotenv
 gradio
 langchain
-langchain-huggingface
+langchain_community

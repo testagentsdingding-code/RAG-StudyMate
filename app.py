@@ -3,14 +3,12 @@ from email.mime.text import MIMEText
 import numpy as np
 import gradio as gr
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
-
 MODEL = "openai/gpt-oss-20b"
-EMBED_MODEL = "all-MiniLM-L6-v2"
 CHUNK_SIZE, OVERLAP, TOP_K, MAX_HISTORY = 900, 150, 4, 6
 MAX_SCORE = 5  # marks per question
 UNKNOWN_PHRASES = ("i don't know", "i dont know", "don't know", "dont know", "no idea",
@@ -18,7 +16,10 @@ UNKNOWN_PHRASES = ("i don't know", "i dont know", "don't know", "dont know", "no
                    "i can't answer", "skip", "skip this")
 
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
-embedder = SentenceTransformer(EMBED_MODEL)
+embedder = HuggingFaceInferenceAPIEmbeddings(
+    api_key=os.environ.get("HF_TOKEN"),
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = (os.getenv("GMAIL_APP_PASSWORD") or "").replace(" ", "")
 REPORT_TO = os.getenv("REPORT_TO") or GMAIL_USER  # default recipient: no typing needed

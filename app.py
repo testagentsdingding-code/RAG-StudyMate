@@ -9,34 +9,37 @@ from dotenv import load_dotenv
 load_dotenv()
 MODEL = "openai/gpt-oss-20b"
 CHUNK_SIZE, OVERLAP, TOP_K, MAX_HISTORY = 900, 150, 4, 6
-MAX_SCORE = 5  # marks per question
+MAX_SCORE = 5  
 UNKNOWN_PHRASES = ("i don't know", "i dont know", "don't know", "dont know", "no idea",
                    "not sure", "i'm not sure", "im not sure", "i cannot answer",
                    "i can't answer", "skip", "skip this")
 
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
-from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+from huggingface_hub import InferenceClient
 
-embedder = HuggingFaceInferenceAPIEmbeddings(
-    api_key=os.environ.get("HF_TOKEN"),
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+hf_client = InferenceClient(api_key=os.environ.get("HF_TOKEN"))
+
+def embed(texts):
+    vecs = np.asarray(
+        hf_client.feature_extraction(texts, model="sentence-transformers/all-MiniLM-L6-v2"),
+        dtype=np.float32)
+    return vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
+  
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = (os.getenv("GMAIL_APP_PASSWORD") or "").replace(" ", "")
 REPORT_TO = os.getenv("REPORT_TO") or GMAIL_USER  
 
-# ---------------------------------------------------------------- LLM helpers
 def llm(prompt, temperature=0.3, tokens=1200):
     r = client.chat.completions.create(
         model=MODEL, temperature=temperature, max_tokens=tokens,
-        # gpt-oss models spend max_tokens on hidden reasoning first; keep it short so replies aren't cut off
+       
         extra_body={"reasoning_effort": "low"} if "gpt-oss" in MODEL else None,
         messages=[{"role": "user", "content": prompt}])
     return r.choices[0].message.content or ""
 
 def llm_json(prompt, temperature=0, tokens=1200):
-    for attempt in (1, 2):  # if the reply was cut off, retry once with a doubled budget
+    for attempt in (1, 2):  
         text = llm(prompt, temperature, tokens * attempt).strip()
         try:
             return json.loads(re.sub(r"^```(?:json)?|```$", "", text, flags=re.I).strip())
@@ -55,10 +58,9 @@ def build_kb(paths):
                 chunks.append(chunk)
     if not chunks:
         return None
-    return {"chunks": chunks, "vectors": np.array(embedder.encode(chunks, normalize_embeddings=True))}
-
+    return {"chunks": chunks, "vectors": embed(chunks)}
 def retrieve(kb, query):
-    q = embedder.encode([query], normalize_embeddings=True)[0]
+    q = embed([query])[0]
     top = np.argsort(kb["vectors"] @ q)[::-1][:TOP_K]
     return [kb["chunks"][int(i)] for i in top]
 

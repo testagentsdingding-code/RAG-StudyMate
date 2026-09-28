@@ -4,3 +4,4 @@ numpy
 groq
 python-dotenv
 gradio
+requests

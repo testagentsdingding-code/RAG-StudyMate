@@ -4,5 +4,3 @@ numpy
 groq
 python-dotenv
 gradio
-langchain
-langchain_community

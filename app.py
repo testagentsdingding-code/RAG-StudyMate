@@ -3,7 +3,7 @@ from email.mime.text import MIMEText
 import numpy as np
 import gradio as gr
 from pypdf import PdfReader
-from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+from langchain_huggingface import HuggingFaceInferenceAPIEmbeddings
 from groq import Groq
 from dotenv import load_dotenv
 

@@ -1,7 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
+huggingface_hub
 pypdf
-sentence-transformers
 numpy
 groq
 python-dotenv

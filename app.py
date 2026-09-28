@@ -3,7 +3,6 @@ from email.mime.text import MIMEText
 import numpy as np
 import gradio as gr
 from pypdf import PdfReader
-from langchain_huggingface import HuggingFaceInferenceAPIEmbeddings
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -16,13 +15,16 @@ UNKNOWN_PHRASES = ("i don't know", "i dont know", "don't know", "dont know", "no
                    "i can't answer", "skip", "skip this")
 
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
+
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+
 embedder = HuggingFaceInferenceAPIEmbeddings(
     api_key=os.environ.get("HF_TOKEN"),
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = (os.getenv("GMAIL_APP_PASSWORD") or "").replace(" ", "")
-REPORT_TO = os.getenv("REPORT_TO") or GMAIL_USER  # default recipient: no typing needed
+REPORT_TO = os.getenv("REPORT_TO") or GMAIL_USER  
 
 # ---------------------------------------------------------------- LLM helpers
 def llm(prompt, temperature=0.3, tokens=1200):

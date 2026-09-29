@@ -1,4 +1,4 @@
-import os, json, re, html, smtplib
+import os, json, re, html, smtplib, random
 from email.mime.text import MIMEText
 import numpy as np
 import gradio as gr
@@ -6,11 +6,12 @@ from pypdf import PdfReader
 from groq import Groq
 from dotenv import load_dotenv
 import requests
+from apscheduler.schedulers.background import BackgroundScheduler
 
 load_dotenv()
 MODEL = "openai/gpt-oss-20b"
 CHUNK_SIZE, OVERLAP, TOP_K, MAX_HISTORY = 900, 150, 4, 6
-MAX_SCORE = 5  
+MAX_SCORE = 5
 UNKNOWN_PHRASES = ("i don't know", "i dont know", "don't know", "dont know", "no idea",
                    "not sure", "i'm not sure", "im not sure", "i cannot answer",
                    "i can't answer", "skip", "skip this")
@@ -26,28 +27,28 @@ def embed(texts):
         hf_client.feature_extraction(texts, model="sentence-transformers/all-MiniLM-L6-v2"),
         dtype=np.float32)
     return vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
-  
+
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = (os.getenv("GMAIL_APP_PASSWORD") or "").replace(" ", "")
-REPORT_TO = os.getenv("REPORT_TO") or GMAIL_USER  
+REPORT_TO = os.getenv("REPORT_TO") or GMAIL_USER
 
 def llm(prompt, temperature=0.3, tokens=1200):
     r = client.chat.completions.create(
         model=MODEL, temperature=temperature, max_tokens=tokens,
-       
+
         extra_body={"reasoning_effort": "low"} if "gpt-oss" in MODEL else None,
         messages=[{"role": "user", "content": prompt}])
     return r.choices[0].message.content or ""
 
 def llm_json(prompt, temperature=0, tokens=1200):
-    for attempt in (1, 2):  
+    for attempt in (1, 2):
         text = llm(prompt, temperature, tokens * attempt).strip()
         try:
             return json.loads(re.sub(r"^```(?:json)?|```$", "", text, flags=re.I).strip())
         except json.JSONDecodeError:
             if attempt == 2:
                 raise
-              
+
 def build_kb(paths):
     chunks = []
     for path in paths:
@@ -268,6 +269,36 @@ def send_report(email, report, results):
     except Exception as error:
         return f"Email failed: {error}"
 
+
+# ── Daily weak-topic practice email ────────────────────────────────────────────
+WEAK_FILE = "weak.json"
+
+def save_weak(email, s):
+    """Remember the source passages of questions the student scored below 3/5."""
+    data = json.load(open(WEAK_FILE)) if os.path.exists(WEAK_FILE) else {}
+    data[email] = [q["source_chunk"] for q, r in zip(s["quiz"], s["results"]) if r["score"] < 3]
+    json.dump(data, open(WEAK_FILE, "w"))
+
+def daily_practice():
+    """Email fresh questions on each student's weak topics."""
+    if not os.path.exists(WEAK_FILE):
+        return
+    for email, chunks in json.load(open(WEAK_FILE)).items():
+        if not chunks:
+            continue
+        passages = "\n\n".join(f"[PASSAGE]\n{c}" for c in random.sample(chunks, min(3, len(chunks))))
+        qs = llm(f"""For each passage, write a short topic heading, then 2 NEW short-answer practice
+questions based only on that passage. Questions only, no answers.\n\n{passages}""", 0.5, 1200)
+        requests.post("https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {os.environ.get('RESEND_API_KEY')}"},
+            json={"from": "StudyMate <onboarding@resend.dev>", "to": [email],
+                  "subject": "Practice questions on your weak topics", "text": qs}, timeout=20)
+
+sched = BackgroundScheduler(timezone="Asia/Kolkata")
+sched.add_job(daily_practice, "cron", hour=8, minute=0)
+sched.start()
+
+
 def ask(s):
     q = s["quiz"][s["index"]]
     return f"### Question {s['index'] + 1} of {len(s['quiz'])}\n\n**{q['question']}**"
@@ -315,7 +346,8 @@ def quiz_turn(s, text):
 
     report = create_report(s["results"])
     s["report"], s["phase"] = report, "ready"
-    to = s["email"] or REPORT_TO  
+    to = s["email"] or REPORT_TO
+    if to: save_weak(to, s)          # <- new line: remember weak topics for the daily email
     email_status = ("\n\n" + send_report(to, report, s["results"]) if to
                     else "\n\n💡 No recipient set. Add REPORT_TO to .env or type `email: you@example.com`.")
     return ("## 🎯 Quiz Complete\n\n"
@@ -344,7 +376,7 @@ def bot_reply(msg, s):
         return email_command(s, text), s
     if s["phase"] == "quiz":
         return quiz_turn(s, text), s
-    if s["phase"] == "await_count": 
+    if s["phase"] == "await_count":
         if re.search(r"\d+", text):
             return start_quiz(s, text), s
         if text.lower() in {"cancel", "no", "stop"}:
@@ -359,7 +391,7 @@ def bot_reply(msg, s):
     if intent == "quiz":
         if not s["kb"]:
             return "Upload a PDF first.", s
-        if re.search(r"\d+", text):  
+        if re.search(r"\d+", text):
             return start_quiz(s, text), s
         s["phase"] = "await_count"
         return "How many questions would you like in the quiz? (1-10)", s
